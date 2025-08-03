@@ -19,6 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const directoryPicker = document.getElementById('directory-picker');
     const syncBtn = document.getElementById('sync-btn');
     const descriptionRight = document.getElementById('description-right');
+    const copyDeletedBtn = document.getElementById('copy-deleted-btn');
 
     let images = [];
     let directories = [];
@@ -191,6 +192,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 trashBtn.click();
             }
         }
+    });
+
+    copyDeletedBtn.addEventListener('click', () => {
+        deletedFilesTextarea.select();
+        navigator.clipboard.writeText(deletedFilesTextarea.value)
+            .then(() => {
+                const originalText = copyDeletedBtn.textContent;
+                copyDeletedBtn.textContent = 'Copied!';
+                setTimeout(() => {
+                    copyDeletedBtn.textContent = originalText;
+                }, 2000);
+            })
+            .catch(err => {
+                console.error('Failed to copy text: ', err);
+            });
     });
 
     fetchDirectories();
