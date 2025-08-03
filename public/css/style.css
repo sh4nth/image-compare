@@ -1,0 +1,57 @@
+
+body {
+    background-color: #f8f9fa;
+}
+
+.image-container {
+    position: relative;
+    border: 1px solid #dee2e6;
+    border-radius: .25rem;
+    overflow: hidden;
+    height: 400px; /* Fixed height for the container */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.image-container img {
+    max-height: 100%;
+    max-width: 100%;
+    object-fit: contain;
+}
+
+.image-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(255, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.image-container.deleted .image-overlay {
+    opacity: 1;
+}
+
+.overlay-text {
+    color: white;
+    font-size: 1.5rem;
+    font-weight: bold;
+}
+
+.trash-btn, .restore-btn {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: none;
+}
+
+.image-container:hover .trash-btn,
+.image-container.deleted .restore-btn {
+    display: block;
+}

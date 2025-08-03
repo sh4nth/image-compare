@@ -1,0 +1,64 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Image Viewer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="text-center mb-4">Image Viewer</h1>
+        <div class="row mb-4">
+            <div class="col-md-6 offset-md-3">
+                <select class="form-select" id="directory-picker">
+                    <option selected>Select a directory</option>
+                </select>
+            </div>
+        </div>
+        <div class="row">
+            <div class="col-md-6">
+                <div class="text-center fw-bold" id="filename-left"></div>
+                <div class="image-container" id="image-container-left">
+                    <img src="" id="image-left" class="img-fluid rounded">
+                    <div class="image-overlay">
+                        <div class="overlay-text">Marked for Deletion</div>
+                    </div>
+                </div>
+                <div class="text-center mt-2" id="size-left"></div>
+                <div class="d-flex justify-content-center mt-3">
+                    <button class="btn btn-primary me-2" id="prev-left">&lt;</button>
+                    <button class="btn btn-primary" id="next-left">&gt;</button>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="text-center fw-bold" id="filename-right"></div>
+                <div class="image-container" id="image-container-right">
+                    <img src="" id="image-right" class="img-fluid rounded">
+                    <div class="image-overlay">
+                        <div class="overlay-text">Marked for Deletion</div>
+                    </div>
+                    <button class="btn btn-danger trash-btn" id="trash-btn">🗑️</button>
+                    <button class="btn btn-success restore-btn" id="restore-btn">♻️</button>
+                </div>
+                <div class="text-center mt-2" id="size-right"></div>
+                <div class="d-flex justify-content-center mt-3">
+                    <button class="btn btn-primary me-2" id="prev-right">&lt;</button>
+                    <button class="btn btn-primary me-2" id="next-right">&gt;</button>
+                    <button class="btn btn-info" id="sync-btn">Sync</button>
+                </div>
+            </div>
+        </div>
+        <div class="row mt-5">
+            <div class="col">
+                <h3 class="text-center">Files Marked for Deletion</h3>
+                <textarea class="form-control" id="deleted-files" rows="10" readonly></textarea>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+</body>
+</html>
