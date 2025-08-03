@@ -100,6 +100,39 @@ app.get('/api/images', (req, res) => {
     });
 });
 
+app.get('/api/fetch-json', (req, res) => {
+    const imageName = req.query.image;
+    if (!imageName) {
+        return res.status(400).send('Image name is required');
+    }
+
+    const dir = req.query.dir || '';
+    const jsonFileName = path.parse(imageName).name + '.json';
+    const jsonFilePath = path.join(imagesDirectory, dir, jsonFileName);
+
+    // Basic security check
+    if (!jsonFilePath.startsWith(imagesDirectory)) {
+        return res.status(400).send('Invalid path');
+    }
+
+    fs.readFile(jsonFilePath, 'utf8', (err, data) => {
+        if (err) {
+            if (err.code === 'ENOENT') {
+                return res.status(404).send('JSON file not found');
+            }
+            console.error("Could not read the JSON file.", err);
+            return res.status(500).send('Internal Server Error');
+        }
+        try {
+            const jsonData = JSON.parse(data);
+            res.json(jsonData);
+        } catch (parseErr) {
+            console.error("Could not parse JSON data.", parseErr);
+            return res.status(500).send('Error parsing JSON file');
+        }
+    });
+});
+
 app.listen(port, () => {
     console.log(`Image viewer app listening at http://localhost:${port}`);
 });
