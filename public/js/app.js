@@ -18,6 +18,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const deletedFilesTextarea = document.getElementById('deleted-files');
     const directoryPicker = document.getElementById('directory-picker');
     const syncBtn = document.getElementById('sync-btn');
+    const descriptionRight = document.getElementById('description-right');
+    const copyDeletedBtn = document.getElementById('copy-deleted-btn');
 
     let images = [];
     let directories = [];
@@ -81,10 +83,32 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 containerElement.classList.remove('deleted');
             }
+
+            if (imageElement.id === 'image-right') {
+                fetchDescription(imageName);
+            }
         } else {
             imageElement.src = "";
             sizeElement.textContent = "";
             filenameElement.textContent = "";
+            if (imageElement.id === 'image-right') {
+                descriptionRight.value = "";
+            }
+        }
+    }
+
+    async function fetchDescription(imageName) {
+        try {
+            const response = await fetch(`/api/fetch-json?image=${encodeURIComponent(imageName)}&dir=${encodeURIComponent(currentDirectory)}`);
+            if (response.ok) {
+                const data = await response.json();
+                descriptionRight.value = data.description || '';
+            } else {
+                descriptionRight.value = '';
+            }
+        } catch (error) {
+            console.error('Error fetching description:', error);
+            descriptionRight.value = '';
         }
     }
 
@@ -168,6 +192,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 trashBtn.click();
             }
         }
+    });
+
+    copyDeletedBtn.addEventListener('click', () => {
+        deletedFilesTextarea.select();
+        navigator.clipboard.writeText(deletedFilesTextarea.value)
+            .then(() => {
+                const originalText = copyDeletedBtn.textContent;
+                copyDeletedBtn.textContent = 'Copied!';
+                setTimeout(() => {
+                    copyDeletedBtn.textContent = originalText;
+                }, 2000);
+            })
+            .catch(err => {
+                console.error('Failed to copy text: ', err);
+            });
     });
 
     fetchDirectories();
