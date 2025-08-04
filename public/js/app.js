@@ -76,7 +76,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const imagePath = currentDirectory ? `/images/${currentDirectory}/${imageName}` : `/images/${imageName}`;
             imageElement.src = imagePath;
             sizeElement.textContent = formatBytes(imageSize);
-            filenameElement.textContent = imageName;
+            filenameElement.textContent = `${imageName} (${index + 1}/${images.length})`;
             
             if (deletedImages.has(imagePath)) {
                 containerElement.classList.add('deleted');
