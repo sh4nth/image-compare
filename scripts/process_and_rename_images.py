@@ -1,37 +1,44 @@
 #!/usr/bin/env python3
 """
-This script processes JPEG images in a specified directory to generate a shell
-script for renaming them based on their creation timestamp.
+This script processes media files (JPEG images or videos) in a specified
+directory to generate a shell script for renaming them based on their creation
+timestamp.
+
+By default, it processes JPEG images. Use the --videos flag to process video
+files instead.
 
 It performs the following steps:
 
-1.  **Scans for Images:** It recursively searches the provided directory for all
-    JPEG files (.jpg, .jpeg).
+1.  **Scans for Media:** It recursively searches the provided directory for
+    either JPEG files (.jpg, .jpeg) or video files (.avi, .mp4, .mov),
+    depending on the mode.
 
-2.  **Finds Timestamps:** For each image, it tries to find the creation date and
+2.  **Finds Timestamps:** For each file, it tries to find the creation date and
     time from two sources, in order of preference:
-    a.  It uses the `exiftool` utility to read the `DateTimeOriginal` tag from
-        the image's EXIF metadata.
-    b.  If EXIF data is unavailable, it looks for a corresponding Google Photos
-        JSON file (e.g., `image.jpg.supplemental-metadata.json`) and reads the
+    a.  It uses the `exiftool` utility to read metadata tags.
+        - For images, it looks for `DateTimeOriginal`.
+        - For videos, it checks `CreateDate`, `MediaCreateDate`, and
+          `TrackCreateDate`.
+    b.  If metadata is unavailable, it looks for a corresponding Google Photos
+        JSON file (e.g., `media.mp4.supplemental-metadata.json`) and reads the
         `photoTakenTime` timestamp from there.
 
 3.  **Formats New Filenames:** The timestamp is formatted into a `YYYYMMDD-HHMMSS`
     string, which becomes the new base filename.
 
-4.  **Handles Duplicates:** If multiple images have the exact same timestamp, it
+4.  **Handles Duplicates:** If multiple files have the exact same timestamp, it
     appends a sequential suffix (e.g., `-01`, `-02`) to the new filename to
     avoid conflicts.
 
-5.  **Generates a Shell Script:** It does not rename the files directly. Instead, it
-    appends `mv` commands to a shell script named `ALL_YEARS.sh` in the current
-    directory. This script, when run, will:
-    a.  Rename the image to its new timestamp-based name.
+5.  **Generates a Shell Script:** It does not rename the files directly. Instead,
+    it appends `mv` commands to a shell script named `ALL_YEARS.sh` in the
+    current directory. This script, when run, will:
+    a.  Rename the media file to its new timestamp-based name.
     b.  Rename the associated JSON file if one was used.
     c.  Move the renamed files into a parallel directory structure under a `done/`
         directory, preserving the original folder hierarchy.
 
-6.  **Logs Failures:** If a timestamp cannot be found for an image, it adds a
+6.  **Logs Failures:** If a timestamp cannot be found for a file, it adds a
     commented-out line in the `ALL_YEARS.sh` script indicating the failure.
 
 This script requires `exiftool` to be installed and in the system's PATH.
@@ -41,11 +48,12 @@ import subprocess
 import sys
 import re
 import json
+import argparse
 from datetime import datetime
 from collections import defaultdict
 
 def get_exif_datetime(filepath):
-    """Runs exiftool on a file and returns the DateTimeOriginal tag."""
+    """Runs exiftool on an image file and returns the DateTimeOriginal tag."""
     try:
         result = subprocess.run(
             ['exiftool', '-T', '-DateTimeOriginal', filepath],
@@ -61,8 +69,41 @@ def get_exif_datetime(filepath):
         print(f"Error running exiftool on {filepath}: {e}", file=sys.stderr)
         return None
 
+def get_video_exif_datetime(filepath):
+    """
+    Runs exiftool on a video file and returns the creation date from the first
+    available tag in order of preference.
+    """
+    try:
+        cmd = ['exiftool', '-G', '-s', '-DateTimeOriginal', '-CreateDate', '-MediaCreateDate', '-TrackCreateDate', filepath]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+        if result.returncode != 0:
+            return None
+
+        found_tags = {}
+        for line in result.stdout.strip().splitlines():
+            match = re.match(r'\\[\\w\\d_\\]+\\\s+([\\w\\d_]+)\s+:\s+(.*)', line)
+            if match:
+                tag_name, tag_value = match.groups()
+                if re.match(r'\\d{4}:\\d{2}:\\d{2} \\d{2}:\\d{2}:\\d{2}', tag_value.strip()):
+                    found_tags[tag_name] = tag_value.strip()
+
+        preference = ['DateTimeOriginal', 'CreateDate', 'MediaCreateDate', 'TrackCreateDate']
+        for tag in preference:
+            if tag in found_tags:
+                return found_tags[tag]
+
+        return None
+    except FileNotFoundError:
+        print("Error: exiftool not found. Please install it to read EXIF data.", file=sys.stderr)
+        sys.exit(1)
+    except Exception as e:
+        print(f"Error running exiftool on {filepath}: {e}", file=sys.stderr)
+        return None
+
 def find_json_file(image_path):
-    """Finds the JSON file associated with an image, trying different truncations."""
+    """Finds the JSON file associated with a media file, trying different truncations."""
     num = None
     metadata_name = f"{image_path}.supplemental-metadata"
     match = re.match(r'(.*)(\([0-9]+\))(\.[a-zA-Z]*)', image_path)
@@ -95,34 +136,42 @@ def format_exif_datetime(dt_string):
         return None
     return dt_string.replace(':', '').replace(' ', '-', 1)
 
-
-
-def process(directory):
+def process(directory, is_video=False):
   with open('ALL_YEARS.sh', 'a') as f_out:
     timestamp_counts = defaultdict(int)
     
-    # First pass: Collect all potential new basenames and their counts
+    if is_video:
+        file_extensions = ('.avi', '.mp4', '.mov')
+        exif_func = get_video_exif_datetime
+        media_type = "videos"
+    else:
+        file_extensions = ('.jpg', '.jpeg')
+        exif_func = get_exif_datetime
+        media_type = "images"
+
     all_files = []
     for root, _, files in os.walk(directory):
         for filename in files:
-            if filename.lower().endswith(('.jpg', '.jpeg')):
+            if filename.lower().endswith(file_extensions):
                 all_files.append(os.path.join(root, filename))
 
-    # Generate all potential new names
     potential_renames = {}
     total = len(all_files)
+    if total == 0:
+        print(f"No {media_type} found in {directory}")
+        return
+        
     block = total // 10 if total > 10 else total
-    print(f'{len(all_files)} to process in {directory}')
+    print(f'{len(all_files)} {media_type} to process in {directory}')
     for filepath in sorted(all_files):
         timestamp = None
-        exif_dt = get_exif_datetime(filepath)
+        exif_dt = exif_func(filepath)
         if exif_dt:
             timestamp = format_exif_datetime(exif_dt)
         
         json_path = find_json_file(filepath)
-        if not timestamp:
-            if json_path:
-                timestamp = get_json_datetime(json_path)
+        if not timestamp and json_path:
+            timestamp = get_json_datetime(json_path)
 
         if timestamp:
             potential_renames[filepath] = (timestamp, json_path)
@@ -130,14 +179,12 @@ def process(directory):
         else:
             potential_renames[filepath] = (None, None)
 
-
-    # Second pass: Generate the actual commands with suffixes for duplicates
     processed_timestamps = defaultdict(int)
     done = 0
     for filepath in sorted(all_files):
         timestamp, json_path = potential_renames.get(filepath, (None, None))
         done += 1
-        if done % block == 0:
+        if block > 0 and done % block == 0:
             print(f'  {done:04}/{len(all_files):04} done', flush=True)
         if timestamp:
             base_new_name = timestamp
@@ -145,7 +192,6 @@ def process(directory):
             processed_timestamps[base_new_name] += 1
 
             suffix = ""
-            # Add suffix only if there are duplicates
             if timestamp_counts[base_new_name] > 1:
                 suffix = f"-{current_count:02d}"
 
@@ -166,19 +212,32 @@ def process(directory):
 
     print(f'Done')
 
-
 def main():
-    """Main function to find images, get timestamps, and generate rename commands."""
-    if len(sys.argv) < 2 or sys.argv[1] in ('-h', '--help'):
-        print(f"Usage: {sys.argv[0]} <directory>\n")
-        print(__doc__)
-        sys.exit(0)
+    """Main function to find media, get timestamps, and generate rename commands."""
+    parser = argparse.ArgumentParser(
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument('directory', help='The directory to process recursively.')
+    parser.add_argument(
+        '--videos',
+        action='store_true',
+        help='Process video files (.avi, .mp4, .mov) instead of images.'
+    )
+    args = parser.parse_args()
 
-    directory = sys.argv[1]
-    if not os.path.isdir(directory):
-        print(f"Error: Directory not found at '{directory}'", file=sys.stderr)
+    if not os.path.isdir(args.directory):
+        print(f"Error: Directory not found at '{args.directory}'", file=sys.stderr)
         sys.exit(1)
-    process(directory)
+        
+    try:
+        subprocess.run(['exiftool', '-ver'], capture_output=True, check=True, text=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        print("Error: 'exiftool' is not installed or not in your PATH.", file=sys.stderr)
+        print("Please install it to use this script (e.g., 'sudo apt-get install libimage-exiftool-perl')", file=sys.stderr)
+        sys.exit(1)
+
+    process(args.directory, is_video=args.videos)
 
 if __name__ == "__main__":
     main()
