@@ -4,6 +4,8 @@ import os
 import sys
 import argparse
 import shutil
+import subprocess
+import tempfile
 from PIL import Image, ImageSequence, ExifTags
 from tqdm import tqdm
 
@@ -18,57 +20,39 @@ def human_readable_size(size, decimal_places=2):
         size /= 1024.0
     return f"{size:.{decimal_places}f} {unit}"
 
-def resize_image(source_path, output_path):
+def is_tool_installed(name):
+    """Check whether `name` is on PATH and marked as executable."""
+    return shutil.which(name) is not None
+
+def resize_image(source_path, output_path, use_gifsicle=False):
     """
-    Resizes a single image, or copies it if it's already small enough.
+    Dispatches image processing to format-specific functions.
     Returns the number of bytes saved.
     """
+    original_size = os.path.getsize(source_path)
     
     try:
         with Image.open(source_path) as img:
-            # If image is smaller than max size, copy it directly
-            if img.width <= MAX_SIZE[0] and img.height <= MAX_SIZE[1]:
-                shutil.copy2(source_path, output_path)
-                return 0
-
-            # Preserve EXIF data for JPEGs
-            exif_data = None
-            if img.format == 'JPEG' and 'exif' in img.info:
-                exif_data = img.info['exif']
-
-            # Handle animated GIFs
-            if hasattr(img, 'is_animated') and img.is_animated:
-                frames = []
-                for frame in ImageSequence.Iterator(img):
-                    frame_copy = frame.copy()
-                    frame_copy.thumbnail(MAX_SIZE, Image.Resampling.LANCZOS)
-                    frames.append(frame_copy)
-                
-                if frames:
-                    frames[0].save(
-                        output_path,
-                        save_all=True,
-                        append_images=frames[1:],
-                        loop=img.info.get('loop', 0),
-                        duration=img.info.get('duration', 100),
-                        format=img.format
-                    )
-            else:
-                # Handle static images (JPEG, PNG, non-animated GIF)
-                img_copy = img.copy()
-                img_copy.thumbnail(MAX_SIZE, Image.Resampling.LANCZOS)
-                
-                if exif_data:
-                    img_copy.save(output_path, img.format, exif=exif_data)
+            is_too_large = img.width > MAX_SIZE[0] or img.height > MAX_SIZE[1]
+            
+            # For GIFs, we always process them to potentially optimize them.
+            if img.format == 'GIF':
+                _resize_gif_with_optimization(img, source_path, output_path, use_gifsicle)
+            # For other images, we only process if they are too large.
+            elif is_too_large:
+                if img.format == 'JPEG':
+                    _resize_jpeg_with_exif(img, output_path)
                 else:
-                    img_copy.save(output_path, img.format)
+                    _resize_other_image(img, output_path)
+            # Otherwise, just copy the file.
+            else:
+                shutil.copy2(source_path, output_path)
 
         resized_size = os.path.getsize(output_path)
-        original_size = os.path.getsize(source_path)
         bytes_saved = original_size - resized_size
         return bytes_saved
 
-    except (IOError, OSError, Image.UnidentifiedImageError) as e:
+    except (IOError, OSError, Image.UnidentifiedImageError, subprocess.CalledProcessError) as e:
         print(f"ERROR: Could not process file {source_path}. Reason: {e}", file=sys.stderr)
         return 0
 
@@ -84,6 +68,13 @@ def process_directory(input_dir, test_mode=False):
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         print(f"Created output directory: {output_dir}")
+
+    # Check for gifsicle and inform the user
+    use_gifsicle = is_tool_installed('gifsicle')
+    if not use_gifsicle:
+        print("WARNING: 'gifsicle' not found. GIFs will be resized but not optimally compressed.")
+        print("         For smaller GIFs, please install gifsicle (e.g., 'sudo apt-get install gifsicle')")
+
 
     supported_extensions = ('.jpg', '.jpeg', '.png', '.gif')
     
@@ -117,7 +108,7 @@ def process_directory(input_dir, test_mode=False):
             filename = os.path.basename(source_path)
             output_path = os.path.join(output_dir, filename)
             
-            bytes_saved = resize_image(source_path, output_path)
+            bytes_saved = resize_image(source_path, output_path, use_gifsicle)
             if bytes_saved > 0:
                 total_bytes_saved += bytes_saved
             
@@ -155,6 +146,85 @@ def main():
     process_directory(args.input_dir, args.test)
     print("\nProcessing complete.")
 
+
+# --- Image Processing Helper Functions ---
+
+def _resize_gif_with_optimization(img, source_path, output_path, use_gifsicle):
+    """Helper to resize and optimize a GIF."""
+    needs_resize = img.width > MAX_SIZE[0] or img.height > MAX_SIZE[1]
+    
+    # Fallback if gifsicle is not available
+    if not use_gifsicle:
+        frames = []
+        for frame in ImageSequence.Iterator(img):
+            frame_copy = frame.copy()
+            if needs_resize:
+                frame_copy.thumbnail(MAX_SIZE, Image.Resampling.LANCZOS)
+            frames.append(frame_copy)
+        
+        if frames:
+            frames[0].save(
+                output_path,
+                save_all=True,
+                append_images=frames[1:],
+                loop=img.info.get('loop', 0),
+                duration=img.info.get('duration', 100),
+                format='GIF'
+            )
+        return
+
+    # Gifsicle path
+    temp_path = None
+    input_for_gifsicle = source_path
+
+    if needs_resize:
+        # Resize with Pillow first into a temporary file
+        frames = []
+        for frame in ImageSequence.Iterator(img):
+            frame_copy = frame.copy()
+            frame_copy.thumbnail(MAX_SIZE, Image.Resampling.LANCZOS)
+            frames.append(frame_copy)
+        
+        if frames:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".gif") as temp_f:
+                temp_path = temp_f.name
+            
+            frames[0].save(
+                temp_path,
+                save_all=True,
+                append_images=frames[1:],
+                loop=img.info.get('loop', 0),
+                duration=img.info.get('duration', 100),
+                format='GIF'
+            )
+            input_for_gifsicle = temp_path
+    
+    # Optimize with gifsicle
+    subprocess.run(
+        ['gifsicle', '-O3', '--lossy=80', input_for_gifsicle, '-o', output_path],
+        check=True,
+        capture_output=True
+    )
+
+    if temp_path and os.path.exists(temp_path):
+        os.remove(temp_path)
+
+def _resize_jpeg_with_exif(img, output_path):
+    """Helper to resize a JPEG and preserve EXIF."""
+    exif_data = img.info.get('exif')
+    img_copy = img.copy()
+    img_copy.thumbnail(MAX_SIZE, Image.Resampling.LANCZOS)
+    
+    if exif_data:
+        img_copy.save(output_path, 'JPEG', exif=exif_data)
+    else:
+        img_copy.save(output_path, 'JPEG')
+
+def _resize_other_image(img, output_path):
+    """Helper to resize a non-GIF, non-JPEG image."""
+    img_copy = img.copy()
+    img_copy.thumbnail(MAX_SIZE, Image.Resampling.LANCZOS)
+    img_copy.save(output_path, img.format)
 
 
 if __name__ == '__main__':
